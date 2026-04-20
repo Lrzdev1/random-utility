@@ -286,10 +286,13 @@ do
     noclipToggle:OnChanged(function()
         State.NoclipEnabled = Options.Noclip.Value
     end)
-    noclipToggle:AddKeybind("NoclipKeybind", {
+    Tabs.Player:AddKeybind("NoclipKeybind", {
         Title = "Noclip Keybind",
         Mode = "Toggle",
-        Default = "None"
+        Default = "None",
+        Callback = function(Value)
+            noclipToggle:SetValue(Value)
+        end
     })
 
     -- Fly
@@ -301,10 +304,13 @@ do
     flyToggle:OnChanged(function()
         State.FlyEnabled = Options.Fly.Value
     end)
-    flyToggle:AddKeybind("FlyKeybind", {
+    Tabs.Player:AddKeybind("FlyKeybind", {
         Title = "Fly Keybind",
         Mode = "Toggle",
-        Default = "None"
+        Default = "None",
+        Callback = function(Value)
+            flyToggle:SetValue(Value)
+        end
     })
 
     Tabs.Player:AddSlider("FlySpeed", {
@@ -328,10 +334,13 @@ do
     noFallToggle:OnChanged(function()
         State.NoFallDmg = Options.NoFall.Value
     end)
-    noFallToggle:AddKeybind("NoFallKeybind", {
+    Tabs.Player:AddKeybind("NoFallKeybind", {
         Title = "No Fall Keybind",
         Mode = "Toggle",
-        Default = "None"
+        Default = "None",
+        Callback = function(Value)
+            noFallToggle:SetValue(Value)
+        end
     })
 end
 
