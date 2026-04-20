@@ -129,6 +129,11 @@ function PlayerESPHandler:Update()
                 dist = math.floor((myRoot.Position - hrp.Position).Magnitude)
             end
             
+            if dist > self.maxDistance then
+                data.gui.Enabled = false
+                continue
+            end
+            
             local color = isObserving and Color3.fromRGB(0, 220, 255) or Color3.fromRGB(255, 255, 255)
             if dist < 100 and dist > 0 then color = Color3.fromRGB(255, 50, 50) end
             
