@@ -289,7 +289,7 @@ do
     Tabs.Player:AddKeybind("NoclipKeybind", {
         Title = "Noclip Keybind",
         Mode = "Toggle",
-        Default = "None",
+        Default = "N",
         Callback = function(Value)
             noclipToggle:SetValue(Value)
         end
@@ -307,7 +307,7 @@ do
     Tabs.Player:AddKeybind("FlyKeybind", {
         Title = "Fly Keybind",
         Mode = "Toggle",
-        Default = "None",
+        Default = "F",
         Callback = function(Value)
             flyToggle:SetValue(Value)
         end
@@ -337,7 +337,7 @@ do
     Tabs.Player:AddKeybind("NoFallKeybind", {
         Title = "No Fall Keybind",
         Mode = "Toggle",
-        Default = "None",
+        Default = "V",
         Callback = function(Value)
             noFallToggle:SetValue(Value)
         end
