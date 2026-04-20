@@ -22,6 +22,7 @@ function ChakraESPHandler.new()
     self.billboards = {} -- [Model] = BillboardGui
     self.connections = {}
     self.folder = Workspace:FindFirstChild("ChakraPoints")
+    self.maxDistance = math.huge
     return self
 end
 
@@ -49,7 +50,7 @@ function ChakraESPHandler:CreateBillboard(model, pointName)
     bb.Parent = CoreGui
     bb.Adornee = adorneePart
     -- Engine handles distance culling/rendering efficiently
-    bb.MaxDistance = CONFIG.MAX_DISTANCE 
+    bb.MaxDistance = self.maxDistance 
 
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 1, 0)
@@ -116,6 +117,13 @@ function ChakraESPHandler:disable()
         bb:Destroy()
     end
     self.billboards = {}
+end
+
+function ChakraESPHandler:setMaxDistance(val)
+    self.maxDistance = val
+    for _, bb in pairs(self.billboards) do
+        bb.MaxDistance = val
+    end
 end
 
 return ChakraESPHandler
