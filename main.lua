@@ -278,38 +278,42 @@ do
     })
 
     -- Noclip
-    local noclipToggle = Tabs.Player:AddToggle("Noclip", {
+    Tabs.Player:AddToggle("Noclip", {
         Title = "Noclip",
         Description = "Atravessa paredes e objetos.",
         Default = false,
-    })
-    noclipToggle:OnChanged(function()
+    }):OnChanged(function()
         State.NoclipEnabled = Options.Noclip.Value
     end)
-    Tabs.Player:AddKeybind("NoclipKeybind", {
+
+    Tabs.Player:AddKeybind("NoclipKey", {
         Title = "Noclip Keybind",
         Mode = "Toggle",
         Default = "N",
         Callback = function(Value)
-            noclipToggle:SetValue(Value)
+            if Options.Noclip then
+                Options.Noclip:SetValue(Value)
+            end
         end
     })
 
     -- Fly
-    local flyToggle = Tabs.Player:AddToggle("Fly", {
+    Tabs.Player:AddToggle("Fly", {
         Title = "Fly",
         Description = "Voe livremente. WASD + Space/Shift.",
         Default = false,
-    })
-    flyToggle:OnChanged(function()
+    }):OnChanged(function()
         State.FlyEnabled = Options.Fly.Value
     end)
-    Tabs.Player:AddKeybind("FlyKeybind", {
+
+    Tabs.Player:AddKeybind("FlyKey", {
         Title = "Fly Keybind",
         Mode = "Toggle",
         Default = "F",
         Callback = function(Value)
-            flyToggle:SetValue(Value)
+            if Options.Fly then
+                Options.Fly:SetValue(Value)
+            end
         end
     })
 
@@ -326,20 +330,22 @@ do
     })
 
     -- No Fall Damage
-    local noFallToggle = Tabs.Player:AddToggle("NoFall", {
+    Tabs.Player:AddToggle("NoFall", {
         Title = "No Fall Damage",
-        Description = "Previne dano de queda (controla velocidade de queda).",
+        Description = "Previne dano de queda controlando a velocidade vertical.",
         Default = false,
-    })
-    noFallToggle:OnChanged(function()
+    }):OnChanged(function()
         State.NoFallDmg = Options.NoFall.Value
     end)
-    Tabs.Player:AddKeybind("NoFallKeybind", {
+
+    Tabs.Player:AddKeybind("NoFallKey", {
         Title = "No Fall Keybind",
         Mode = "Toggle",
         Default = "V",
         Callback = function(Value)
-            noFallToggle:SetValue(Value)
+            if Options.NoFall then
+                Options.NoFall:SetValue(Value)
+            end
         end
     })
 end
@@ -366,6 +372,19 @@ do
         end
     end)
 
+    Tabs.ESP:AddSlider("PlayerESPRange", {
+        Title = "Player ESP Range",
+        Default = 2000,
+        Min = 50,
+        Max = 10000,
+        Rounding = 0,
+        Callback = function(value)
+            if playerESP then
+                playerESP.maxDistance = value
+            end
+        end
+    })
+
     Tabs.ESP:AddParagraph({
         Title = "Entities",
         Content = "NPCs (amarelo) e Mobs (vermelho)."
@@ -388,6 +407,19 @@ do
         if not mobESP then return end
         mobESP:toggleNPCs(Options.NPCESP.Value)
     end)
+
+    Tabs.ESP:AddSlider("MobESPRange", {
+        Title = "Mob/NPC ESP Range",
+        Default = 1000,
+        Min = 50,
+        Max = 5000,
+        Rounding = 0,
+        Callback = function(value)
+            if mobESP then
+                mobESP.maxDistance = value
+            end
+        end
+    })
 
     Tabs.ESP:AddParagraph({
         Title = "World Items",
@@ -418,6 +450,19 @@ do
         itemESP:toggleCategory("Gem", Options.GemESP.Value)
     end)
 
+    Tabs.ESP:AddSlider("ItemESPRange", {
+        Title = "Item ESP Range",
+        Default = 1500,
+        Min = 50,
+        Max = 5000,
+        Rounding = 0,
+        Callback = function(value)
+            if itemESP then
+                itemESP.maxDistance = value
+            end
+        end
+    })
+
     Tabs.ESP:AddParagraph({
         Title = "Map Points",
         Content = "Chakra e Corrupted Points."
@@ -446,6 +491,23 @@ do
             corruptedESP:disable()
         end
     end)
+
+    Tabs.ESP:AddSlider("MapPointsESPRange", {
+        Title = "Map Points Range",
+        Description = "Distância para Chakra e Corrupted points.",
+        Default = 3000,
+        Min = 100,
+        Max = 10000,
+        Rounding = 0,
+        Callback = function(value)
+            if chakraESP then
+                chakraESP:setMaxDistance(value)
+            end
+            if corruptedESP then
+                corruptedESP:setMaxDistance(value)
+            end
+        end
+    })
 
     -- === Visuals Section ===
     Tabs.ESP:AddParagraph({
