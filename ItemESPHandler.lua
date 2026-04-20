@@ -1,0 +1,200 @@
+-- ItemESPHandler.lua
+-- Unified handler for Trinkets, Fruits, and Gems
+-- FIX: Infinite Distance
+
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+local ItemESPHandler = {}
+ItemESPHandler.__index = ItemESPHandler
+
+local COLORS = {
+    Trinket = Color3.fromRGB(170, 0, 255), -- Purple
+    Fruit = Color3.fromRGB(0, 255, 0),     -- Green
+    Gem = Color3.fromRGB(0, 255, 255)      -- Cyan
+}
+
+-- Config
+local RENDER_DISTANCE = math.huge -- Infinite
+local PROCESS_RATE = 25 
+local FAKE_POS = Vector3.new(1927.698, -125.871506, -1212.71704)
+
+-- Priority list for fruits to prevent them showing as trinkets
+local COMMON_FRUITS = {
+    ["Banana"] = true, ["Apple"] = true, ["Lemon"] = true, ["Pomegranate"] = true,
+    ["Cloudberry"] = true, ["Grapes"] = true, ["Grape"] = true, ["Pear"] = true,
+    ["Pineapple"] = true, ["Watermelon"] = true, ["Pumpkin"] = true, ["Tomato"] = true,
+    ["Mangosteen"] = true, ["Dragon Fruit"] = true, ["Durian"] = true
+}
+
+function ItemESPHandler.new()
+    local self = setmetatable({}, ItemESPHandler)
+    self.settings = { Trinket = false, Fruit = false, Gem = false }
+    self.validItems = {}   
+    self.pendingItems = {} 
+    self.connections = {}
+    self.localPlayer = Players.LocalPlayer
+    self._lastValidationAt = 0
+    return self
+end
+
+function ItemESPHandler:GetCFrame(obj)
+    if obj:IsA("Model") then return obj:GetPivot()
+    elseif obj:IsA("BasePart") then return obj.CFrame end
+    return CFrame.new()
+end
+
+function ItemESPHandler:Identify(obj)
+    -- Only check Workspace items that have properties
+    if not obj:FindFirstChild("Pickupable") or not obj:FindFirstChild("Active") then
+        return nil
+    end
+    
+    -- Fake check
+    local cf = self:GetCFrame(obj)
+    if (cf.Position - FAKE_POS).Magnitude < 2 then return nil end
+    
+    local name = obj.Name
+    
+    -- 1. Priority: Known Fruits (Overrides Attribute check)
+    if COMMON_FRUITS[name] then return "Fruit", name end
+    
+    -- 2. Attribute Check (Trinkets)
+    local realName = obj:GetAttribute("RealName")
+    if realName then
+        -- Double check value just in case
+        if COMMON_FRUITS[realName] then return "Fruit", realName end
+        return "Trinket", realName
+    end
+    
+    -- 3. MeshPart Checks
+    if obj:IsA("MeshPart") then
+        if string.find(name, "Gem") then return "Gem", name end
+        return "Fruit", name -- Default to fruit if mesh and no attr
+    end
+    
+    return nil
+end
+
+function ItemESPHandler:OnItemAdded(obj)
+    if self.validItems[obj] or self.pendingItems[obj] then return end
+    if obj:IsA("Model") or obj:IsA("BasePart") then
+        self.pendingItems[obj] = tick()
+    end
+end
+
+function ItemESPHandler:OnItemRemoved(obj)
+    self.pendingItems[obj] = nil
+    local data = self.validItems[obj]
+    if data then
+        self:DestroyVisuals(data)
+        self.validItems[obj] = nil
+    end
+end
+
+function ItemESPHandler:CreateVisuals(obj, data)
+    if data.Billboard then return end
+    
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "ItemESP"
+    bb.Size = UDim2.new(0, 100, 0, 30)
+    bb.StudsOffset = Vector3.new(0, 2, 0)
+    bb.AlwaysOnTop = true
+    bb.Parent = CoreGui
+    bb.Adornee = obj
+    
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.TextColor3 = COLORS[data.Type] or Color3.new(1,1,1)
+    lbl.TextStrokeTransparency = 0.5
+    lbl.TextSize = 12
+    lbl.Font = Enum.Font.SourceSansBold
+    lbl.Text = string.format("%s", data.Name) -- Just name is cleaner
+    lbl.Parent = bb
+    
+    data.Billboard = bb
+end
+
+function ItemESPHandler:DestroyVisuals(data)
+    if data.Billboard then data.Billboard:Destroy() data.Billboard = nil end
+end
+
+function ItemESPHandler:ValidationLoop()
+    for obj, startTime in pairs(self.pendingItems) do
+        if not obj.Parent then
+            self.pendingItems[obj] = nil
+        else
+            local typeStr, nameStr = self:Identify(obj)
+            if typeStr then
+                self.validItems[obj] = { Type = typeStr, Name = nameStr, Billboard = nil }
+                self.pendingItems[obj] = nil
+            elseif tick() - startTime > 10 then
+                self.pendingItems[obj] = nil 
+            end
+        end
+    end
+end
+
+function ItemESPHandler:RenderLoop()
+    if not self.localPlayer.Character then return end
+    
+    local processed = 0
+    
+    for obj, data in pairs(self.validItems) do
+        if not obj.Parent then
+            self:OnItemRemoved(obj)
+        else
+            -- Always render if type enabled (removed distance check)
+            if self.settings[data.Type] then
+                if not data.Billboard then self:CreateVisuals(obj, data) end
+            else
+                if data.Billboard then self:DestroyVisuals(data) end
+            end
+        end
+        processed = processed + 1
+        if processed > PROCESS_RATE then break end
+    end
+end
+
+function ItemESPHandler:Start()
+    if self.connections.Render then return end
+    
+    -- Initial Scan (Workspace Only)
+    for _, v in ipairs(Workspace:GetChildren()) do self:OnItemAdded(v) end
+    
+    self.connections.WsAdd = Workspace.ChildAdded:Connect(function(c) self:OnItemAdded(c) end)
+    self.connections.WsRem = Workspace.ChildRemoved:Connect(function(c) self:OnItemRemoved(c) end)
+    
+    self.connections.Render = RunService.Heartbeat:Connect(function() self:RenderLoop() end)
+    self.connections.Validation = RunService.Heartbeat:Connect(function()
+        local now = tick()
+        if now - self._lastValidationAt >= 0.5 then
+            self._lastValidationAt = now
+            self:ValidationLoop()
+        end
+    end)
+end
+
+function ItemESPHandler:Stop()
+    for _, c in pairs(self.connections) do c:Disconnect() end
+    self.connections = {}
+    for _, data in pairs(self.validItems) do self:DestroyVisuals(data) end
+    self.validItems = {}
+    self.pendingItems = {}
+end
+
+function ItemESPHandler:toggleCategory(cat, val)
+    self.settings[cat] = val
+    local any = self.settings.Trinket or self.settings.Fruit or self.settings.Gem
+    if any and not self.connections.Render then self:Start()
+    elseif not any and self.connections.Render then self:Stop() end
+end
+
+function ItemESPHandler:setMaxDistance(val)
+    RENDER_DISTANCE = math.huge
+end
+
+return ItemESPHandler

@@ -1,0 +1,242 @@
+-- MobESPHandler.lua (Bloodlines Specific)
+-- Handles NPC (Dialog) and Mob (Combat) ESP
+-- OPTIMIZED: Event-based scanning with Dynamic Sizing & State Watching
+
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local MobESPHandler = {}
+MobESPHandler.__index = MobESPHandler
+
+-- Config
+local COLORS = {
+    NPC = Color3.fromRGB(255, 255, 0), -- Yellow
+    MOB = Color3.fromRGB(255, 50, 50)  -- Red
+}
+
+function MobESPHandler.new()
+    local self = setmetatable({}, MobESPHandler)
+    self.showMobs = false
+    self.showNPCs = false
+    self.maxDistance = math.huge -- Default Infinite
+    self.billboards = {} -- [Model] = {gui=BillboardGui, type="NPC"|"MOB", lbl=TextLabel, connections={}}
+    self.watchedModels = {} -- [Model] = RBXScriptConnection (stored for cleanup)
+    self.connections = {}
+    self._lastRescanAt = 0
+    return self
+end
+
+function MobESPHandler:CreateBillboard(model, typeStr)
+    -- If we already have a billboard, just update the type/color
+    if self.billboards[model] then 
+        self.billboards[model].type = typeStr
+        self:UpdateVisuals(model)
+        return 
+    end
+    
+    local height = 5 -- Default
+    if model.PrimaryPart then
+        height = model.PrimaryPart.Size.Y / 2
+    else
+        local extents = model:GetExtentsSize()
+        if extents.Y > 1 then height = extents.Y end
+    end
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "MobESP"
+    bb.Size = UDim2.new(0, 100 + (height * 2), 0, 40 + height)
+    bb.StudsOffset = Vector3.new(0, height + 2, 0)
+    bb.AlwaysOnTop = true
+    bb.Parent = CoreGui
+    bb.Adornee = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+    
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.TextColor3 = (typeStr == "NPC") and COLORS.NPC or COLORS.MOB
+    lbl.TextStrokeTransparency = 0.3
+    lbl.Font = Enum.Font.SourceSansBold
+    lbl.TextSize = math.clamp(14 + (height * 0.5), 12, 24)
+    lbl.Text = model.Name
+    lbl.Parent = bb
+    
+    self.billboards[model] = {
+        gui = bb, 
+        type = typeStr, 
+        lbl = lbl,
+        connections = {} -- Store per-mob connections (like ValueChanged)
+    }
+end
+
+function MobESPHandler:UpdateVisuals(model)
+    local data = self.billboards[model]
+    if not data then return end
+    
+    -- Update Color based on new type
+    local color = (data.type == "NPC") and COLORS.NPC or COLORS.MOB
+    data.lbl.TextColor3 = color
+end
+
+function MobESPHandler:WatchMobState(model, npcVal)
+    -- Watch for changes (e.g., Dialog -> Combat)
+    if self.billboards[model] and not self.billboards[model].connections.ValChanged then
+        self.billboards[model].connections.ValChanged = npcVal.Changed:Connect(function(newValue)
+            if newValue == "Combat" then
+                self.billboards[model].type = "MOB"
+            elseif newValue == "Dialog" then
+                self.billboards[model].type = "NPC"
+            end
+            self:UpdateVisuals(model)
+        end)
+    end
+end
+
+function MobESPHandler:CheckMob(model)
+    if not model:IsA("Model") then return end
+    
+    -- Cleanup check
+    if not model.Parent then 
+        self:CleanupModel(model)
+        return 
+    end
+
+    -- 1. Check if it's already a valid mob/npc
+    local npcVal = model:FindFirstChild("NPC")
+    if npcVal and npcVal:IsA("StringValue") then
+        local val = npcVal.Value
+        if val == "Dialog" then
+            self:CreateBillboard(model, "NPC")
+            self:WatchMobState(model, npcVal)
+        elseif val == "Combat" then
+            self:CreateBillboard(model, "MOB")
+            self:WatchMobState(model, npcVal)
+        end
+    else
+        -- 2. If no NPC value yet, listen for it (Lazy Loading / Transform logic)
+        if not self.watchedModels[model] and model:FindFirstChild("Humanoid") then
+            local conn
+            conn = model.ChildAdded:Connect(function(child)
+                if child.Name == "NPC" and child:IsA("StringValue") then
+                    self:CheckMob(model)
+                    if conn then conn:Disconnect() end
+                    self.watchedModels[model] = nil
+                end
+            end)
+            -- Store connection for cleanup if model is removed before NPC value loads
+            self.watchedModels[model] = conn
+        end
+    end
+end
+
+function MobESPHandler:CleanupModel(model)
+    if self.billboards[model] then
+        for _, c in pairs(self.billboards[model].connections) do
+            if typeof(c) == "RBXScriptConnection" then c:Disconnect() end
+        end
+        self.billboards[model].gui:Destroy()
+        self.billboards[model] = nil
+    end
+    -- Disconnect orphaned watcher connection if it exists
+    local watcherConn = self.watchedModels[model]
+    if watcherConn and typeof(watcherConn) == "RBXScriptConnection" then
+        watcherConn:Disconnect()
+    end
+    self.watchedModels[model] = nil
+end
+
+function MobESPHandler:Scan()
+    for _, model in ipairs(Workspace:GetChildren()) do
+        self:CheckMob(model)
+    end
+end
+
+function MobESPHandler:Update()
+    local camera = Workspace.CurrentCamera
+    if not camera then return end
+    local camPos = camera.CFrame.Position
+    
+    for model, data in pairs(self.billboards) do
+        if not model.Parent then
+            self:CleanupModel(model)
+        else
+            -- Visibility Check
+            local isVisible = false
+            if data.type == "NPC" and self.showNPCs then isVisible = true end
+            if data.type == "MOB" and self.showMobs then isVisible = true end
+            
+            if isVisible then
+                local part = data.gui.Adornee
+                if part then
+                    local dist = (part.Position - camPos).Magnitude
+                    
+                    local hum = model:FindFirstChild("Humanoid")
+                    local hp = hum and math.floor(hum.Health) or 0
+                    local maxHp = hum and math.floor(hum.MaxHealth) or 100
+                    
+                    local nameColorHex = data.type == "MOB" and "#FF3232" or "#FFFF00"
+                    
+                    data.lbl.Text = string.format(
+                        "<font color='%s'>%s</font>\n<font color='#FFFFFF'>[%dm] HP: %d/%d</font>", 
+                        nameColorHex, 
+                        model.Name, 
+                        dist, 
+                        hp,
+                        maxHp
+                    )
+                    data.lbl.RichText = true
+                else
+                    -- Try to re-find adornee if it was nil (e.g. streaming enabled)
+                    data.gui.Adornee = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+                end
+            end
+            
+            data.gui.Enabled = isVisible
+        end
+    end
+end
+
+function MobESPHandler:StartLoop()
+    if self.connections.Update then return end
+    
+    self:Scan()
+    
+    self.connections.ChildAdded = Workspace.ChildAdded:Connect(function(child)
+        task.wait(0.1) 
+        self:CheckMob(child)
+    end)
+    
+    self.connections.Rescan = RunService.Heartbeat:Connect(function()
+        local now = tick()
+        if now - self._lastRescanAt >= 2 then
+            self._lastRescanAt = now
+            self:Scan()
+        end
+    end)
+    
+    self.connections.Update = RunService.Heartbeat:Connect(function()
+        self:Update()
+    end)
+end
+
+function MobESPHandler:StopLoop()
+    if self.connections.ChildAdded then self.connections.ChildAdded:Disconnect() self.connections.ChildAdded = nil end
+    if self.connections.Update then self.connections.Update:Disconnect() self.connections.Update = nil end
+    if self.connections.Rescan then self.connections.Rescan:Disconnect() self.connections.Rescan = nil end
+    
+    for _, data in pairs(self.billboards) do
+        data.gui.Enabled = false
+    end
+end
+
+function MobESPHandler:toggleMobs(val)
+    self.showMobs = val
+    if self.showMobs or self.showNPCs then self:StartLoop() else self:StopLoop() end
+end
+
+function MobESPHandler:toggleNPCs(val)
+    self.showNPCs = val
+    if self.showMobs or self.showNPCs then self:StartLoop() else self:StopLoop() end
+end
+
+return MobESPHandler
