@@ -37,6 +37,7 @@ function ItemESPHandler.new()
     self.connections = {}
     self.localPlayer = Players.LocalPlayer
     self._lastValidationAt = 0
+    self.maxDistance = math.huge
     return self
 end
 
@@ -147,8 +148,12 @@ function ItemESPHandler:RenderLoop()
         if not obj.Parent then
             self:OnItemRemoved(obj)
         else
-            -- Always render if type enabled (removed distance check)
-            if self.settings[data.Type] then
+            local myPos = self.localPlayer.Character.PrimaryPart and self.localPlayer.Character.PrimaryPart.Position or nil
+            local itemPos = self:GetCFrame(obj).Position
+            
+            local dist = myPos and (myPos - itemPos).Magnitude or 0
+            
+            if dist <= self.maxDistance and self.settings[data.Type] then
                 if not data.Billboard then self:CreateVisuals(obj, data) end
             else
                 if data.Billboard then self:DestroyVisuals(data) end
