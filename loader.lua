@@ -15,45 +15,57 @@ if WEBHOOK_URL ~= "" then
         local gameId = game.PlaceId
         local jobId = game.JobId
 
+        local profileUrl = "https://www.roblox.com/users/" .. tostring(playerId) .. "/profile"
+        local avatarUrl = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(playerId) .. "&width=420&height=420&format=png"
+
         local data = {
             ["embeds"] = {
                 {
-                    ["title"] = "🟢 Script Executed",
-                    ["color"] = 5763719,
+                    ["author"] = {
+                        ["name"] = "🩸 Bloodlines | Script Executed",
+                        ["icon_url"] = "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Roblox_player_icon_black.svg/1200px-Roblox_player_icon_black.svg.png"
+                    },
+                    ["title"] = "🔗 Ver Perfil do Jogador (" .. playerName .. ")",
+                    ["url"] = profileUrl,
+                    ["description"] = "**Um usuário acabou de injetar o ESP by lrnz!**",
+                    ["color"] = 10181046,
+                    ["thumbnail"] = {
+                        ["url"] = avatarUrl
+                    },
                     ["fields"] = {
                         {
                             ["name"] = "👤 Player",
-                            ["value"] = playerName,
+                            ["value"] = "```" .. playerName .. "```",
                             ["inline"] = true
                         },
                         {
                             ["name"] = "🆔 UserId",
-                            ["value"] = tostring(playerId),
+                            ["value"] = "```" .. tostring(playerId) .. "```",
                             ["inline"] = true
                         },
                         {
                             ["name"] = "🎮 Executor",
-                            ["value"] = executorName,
-                            ["inline"] = true
-                        },
-                        {
-                            ["name"] = "🕐 Time",
-                            ["value"] = currentTime,
+                            ["value"] = "```" .. executorName .. "```",
                             ["inline"] = true
                         },
                         {
                             ["name"] = "🌐 PlaceId",
-                            ["value"] = tostring(gameId),
+                            ["value"] = "```" .. tostring(gameId) .. "```",
                             ["inline"] = true
                         },
                         {
-                            ["name"] = "🔗 JobId",
-                            ["value"] = string.sub(jobId, 1, 8) .. "...",
-                            ["inline"] = true
+                            ["name"] = "🔗 JobId Completo",
+                            ["value"] = "```" .. jobId .. "```",
+                            ["inline"] = false
+                        },
+                        {
+                            ["name"] = "💻 Teleport Script (Para dar Join)",
+                            ["value"] = "```lua\ngame:GetService('TeleportService'):TeleportToPlaceInstance(" .. tostring(gameId) .. ", '" .. jobId .. "', game:GetService('Players').LocalPlayer)\n```",
+                            ["inline"] = false
                         }
                     },
                     ["footer"] = {
-                        ["text"] = "ESP by lrnz"
+                        ["text"] = "ESP by lrnz • " .. currentTime
                     },
                     ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
                 }
