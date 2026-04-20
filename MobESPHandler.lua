@@ -170,6 +170,11 @@ function MobESPHandler:Update()
                 if part then
                     local dist = (part.Position - camPos).Magnitude
                     
+                    if dist > self.maxDistance then
+                        data.gui.Enabled = false
+                        continue
+                    end
+                    
                     local hum = model:FindFirstChild("Humanoid")
                     local hp = hum and math.floor(hum.Health) or 0
                     local maxHp = hum and math.floor(hum.MaxHealth) or 100
