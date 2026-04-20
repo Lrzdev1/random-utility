@@ -80,6 +80,7 @@ local State = {
     FlyEnabled = false,
     FlySpeed = 2, -- CFrame units per frame (much smaller scale than Velocity)
     NoclipEnabled = false,
+    NoFallDmg = false,
 }
 
 local CoreConnections = {}
@@ -185,6 +186,18 @@ local function StartCoreLoops()
             root.CFrame = root.CFrame + (hum.MoveDirection * hum.WalkSpeed * 0.05)
         end
     end)
+
+    -- 4. Stepped: No Fall Damage (clamping vertical velocity)
+    CoreConnections.NoFall = RunService.Stepped:Connect(function()
+        if not State.NoFallDmg then return end
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if root and root.Velocity.Y < -40 then
+            -- If falling too fast, slow down to prevent fatal impact
+            root.Velocity = Vector3.new(root.Velocity.X, -40, root.Velocity.Z)
+            root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -40, root.AssemblyLinearVelocity.Z)
+        end
+    end)
 end
 
 -- Start the core loops immediately
@@ -265,22 +278,34 @@ do
     })
 
     -- Noclip
-    Tabs.Player:AddToggle("Noclip", {
+    local noclipToggle = Tabs.Player:AddToggle("Noclip", {
         Title = "Noclip",
         Description = "Atravessa paredes e objetos.",
         Default = false,
-    }):OnChanged(function()
+    })
+    noclipToggle:OnChanged(function()
         State.NoclipEnabled = Options.Noclip.Value
     end)
+    noclipToggle:AddKeybind("NoclipKeybind", {
+        Title = "Noclip Keybind",
+        Mode = "Toggle",
+        Default = "None"
+    })
 
     -- Fly
-    Tabs.Player:AddToggle("Fly", {
+    local flyToggle = Tabs.Player:AddToggle("Fly", {
         Title = "Fly",
         Description = "Voe livremente. WASD + Space/Shift.",
         Default = false,
-    }):OnChanged(function()
+    })
+    flyToggle:OnChanged(function()
         State.FlyEnabled = Options.Fly.Value
     end)
+    flyToggle:AddKeybind("FlyKeybind", {
+        Title = "Fly Keybind",
+        Mode = "Toggle",
+        Default = "None"
+    })
 
     Tabs.Player:AddSlider("FlySpeed", {
         Title = "Fly Speed",
@@ -292,6 +317,21 @@ do
         Callback = function(value)
             State.FlySpeed = value
         end
+    })
+
+    -- No Fall Damage
+    local noFallToggle = Tabs.Player:AddToggle("NoFall", {
+        Title = "No Fall Damage",
+        Description = "Previne dano de queda (controla velocidade de queda).",
+        Default = false,
+    })
+    noFallToggle:OnChanged(function()
+        State.NoFallDmg = Options.NoFall.Value
+    end)
+    noFallToggle:AddKeybind("NoFallKeybind", {
+        Title = "No Fall Keybind",
+        Mode = "Toggle",
+        Default = "None"
     })
 end
 
@@ -395,6 +435,273 @@ do
             corruptedESP:enable()
         else
             corruptedESP:disable()
+        end
+    end)
+
+    -- === Visuals Section ===
+    Tabs.ESP:AddParagraph({
+        Title = "Visuals",
+        Content = "Efeitos visuais e limpeza de tela."
+    })
+
+    -- No Fog (inline — too simple for a handler)
+    local fogState = {
+        enabled = false,
+        originalFogEnd = nil,
+        originalFogStart = nil,
+        originalAtmospheres = {},
+    }
+
+    Tabs.ESP:AddToggle("NoFog", {
+        Title = "No Fog",
+        Description = "Remove toda a neblina do mapa para visibilidade total.",
+        Default = false,
+    }):OnChanged(function()
+        local Lighting = game:GetService("Lighting")
+        if Options.NoFog.Value then
+            -- Save originals
+            fogState.originalFogEnd = Lighting.FogEnd
+            fogState.originalFogStart = Lighting.FogStart
+            fogState.originalAtmospheres = {}
+
+            -- Nuke fog
+            Lighting.FogEnd = 1e10
+            Lighting.FogStart = 1e10
+
+            -- Disable all Atmosphere instances
+            for _, child in ipairs(Lighting:GetChildren()) do
+                if child:IsA("Atmosphere") then
+                    table.insert(fogState.originalAtmospheres, { inst = child, density = child.Density, offset = child.Offset })
+                    child.Density = 0
+                    child.Offset = 0
+                end
+            end
+
+            fogState.enabled = true
+        else
+            -- Restore originals
+            if fogState.originalFogEnd then Lighting.FogEnd = fogState.originalFogEnd end
+            if fogState.originalFogStart then Lighting.FogStart = fogState.originalFogStart end
+            for _, data in ipairs(fogState.originalAtmospheres) do
+                if data.inst and data.inst.Parent then
+                    data.inst.Density = data.density
+                    data.inst.Offset = data.offset
+                end
+            end
+            fogState.originalAtmospheres = {}
+            fogState.enabled = false
+        end
+    end)
+
+    -- === Spectate Section (Hover + Click) ===
+    Tabs.ESP:AddParagraph({
+        Title = "Spectate",
+        Content = "Passe o mouse em cima de um jogador → nome fica vermelho → clique para observar. Pressione Q para voltar."
+    })
+
+    local spectateState = {
+        enabled = false,
+        active = false,       -- Currently spectating someone
+        hoveredPlayer = nil,  -- Player under mouse cursor
+        targetPlayer = nil,   -- Player being spectated
+        originalSubject = nil,
+        connections = {},
+        highlight = nil,      -- Highlight instance
+        hoverLabel = nil,     -- BillboardGui for hover name
+    }
+
+    -- Create the hover label (red name above player head)
+    local function createHoverLabel()
+        if spectateState.hoverLabel then return end
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "SpectateHover"
+        bb.Size = UDim2.new(0, 200, 0, 30)
+        bb.StudsOffset = Vector3.new(0, 5, 0)
+        bb.AlwaysOnTop = true
+        bb.Enabled = false
+        bb.Parent = game:GetService("CoreGui")
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, 0, 1, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.TextColor3 = Color3.fromRGB(255, 50, 50)
+        lbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+        lbl.TextStrokeTransparency = 0
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextSize = 20
+        lbl.Text = ""
+        lbl.Parent = bb
+
+        spectateState.hoverLabel = bb
+        spectateState.hoverLabelText = lbl
+    end
+
+    local function getPlayerFromPart(part)
+        if not part then return nil end
+        -- Walk up the parent tree to find a character model that belongs to a player
+        local current = part
+        while current and current ~= Workspace do
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character and p.Character == current then
+                    return p
+                end
+            end
+            current = current.Parent
+        end
+        return nil
+    end
+
+    local function stopSpectate()
+        spectateState.active = false
+        if spectateState.originalSubject then
+            pcall(function()
+                Workspace.CurrentCamera.CameraSubject = spectateState.originalSubject
+            end)
+        end
+        spectateState.targetPlayer = nil
+        -- Remove highlight
+        if spectateState.highlight then
+            spectateState.highlight:Destroy()
+            spectateState.highlight = nil
+        end
+    end
+
+    local function startSpectate(player)
+        if not player or not player.Character then return end
+        local targetHum = player.Character:FindFirstChildOfClass("Humanoid")
+        if not targetHum then return end
+
+        -- Save original
+        if not spectateState.active then
+            spectateState.originalSubject = Workspace.CurrentCamera.CameraSubject
+        end
+
+        spectateState.targetPlayer = player
+        spectateState.active = true
+
+        -- Set camera
+        Workspace.CurrentCamera.CameraSubject = targetHum
+
+        -- Add highlight to show who you're spectating
+        if spectateState.highlight then spectateState.highlight:Destroy() end
+        local hl = Instance.new("Highlight")
+        hl.Name = "SpectateHighlight"
+        hl.FillColor = Color3.fromRGB(255, 50, 50)
+        hl.FillTransparency = 0.7
+        hl.OutlineColor = Color3.fromRGB(255, 0, 0)
+        hl.OutlineTransparency = 0
+        hl.Adornee = player.Character
+        hl.Parent = game:GetService("CoreGui")
+        spectateState.highlight = hl
+
+        Fluent:Notify({
+            Title = "Spectate",
+            Content = "Observando: " .. player.Name .. "\nPressione Q para voltar.",
+            Duration = 4
+        })
+    end
+
+    local function startSpectateSystem()
+        createHoverLabel()
+
+        local mouse = LocalPlayer:GetMouse()
+
+        -- Hover detection (RenderStepped raycast)
+        spectateState.connections.Hover = RunService.RenderStepped:Connect(function()
+            if not spectateState.enabled then return end
+            if spectateState.active then
+                -- While spectating, hide hover label
+                if spectateState.hoverLabel then
+                    spectateState.hoverLabel.Enabled = false
+                end
+                return
+            end
+
+            -- Raycast from mouse
+            local target = mouse.Target
+            local player = getPlayerFromPart(target)
+
+            if player then
+                spectateState.hoveredPlayer = player
+                local head = player.Character and player.Character:FindFirstChild("Head")
+                if head and spectateState.hoverLabel then
+                    spectateState.hoverLabel.Adornee = head
+                    spectateState.hoverLabelText.Text = "🔴 " .. player.Name .. " (Clique)"
+                    spectateState.hoverLabel.Enabled = true
+                end
+            else
+                spectateState.hoveredPlayer = nil
+                if spectateState.hoverLabel then
+                    spectateState.hoverLabel.Enabled = false
+                end
+            end
+        end)
+
+        -- Click to spectate
+        spectateState.connections.Click = mouse.Button1Down:Connect(function()
+            if not spectateState.enabled then return end
+
+            if spectateState.active then
+                -- Already spectating — click again to stop
+                stopSpectate()
+                return
+            end
+
+            if spectateState.hoveredPlayer then
+                startSpectate(spectateState.hoveredPlayer)
+            end
+        end)
+
+        -- Q key to unspectate
+        spectateState.connections.Key = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if gameProcessed then return end
+            if input.KeyCode == Enum.KeyCode.Q and spectateState.active then
+                stopSpectate()
+                Fluent:Notify({
+                    Title = "Spectate",
+                    Content = "Voltou para seu personagem.",
+                    Duration = 2
+                })
+            end
+        end)
+
+        -- Cleanup if target player leaves
+        spectateState.connections.PlayerRem = Players.PlayerRemoving:Connect(function(p)
+            if p == spectateState.targetPlayer then
+                stopSpectate()
+                Fluent:Notify({
+                    Title = "Spectate",
+                    Content = p.Name .. " saiu do servidor.",
+                    Duration = 3
+                })
+            end
+        end)
+    end
+
+    local function stopSpectateSystem()
+        stopSpectate()
+        for _, conn in pairs(spectateState.connections) do
+            if conn and typeof(conn) == "RBXScriptConnection" then
+                conn:Disconnect()
+            end
+        end
+        spectateState.connections = {}
+        spectateState.hoveredPlayer = nil
+        if spectateState.hoverLabel then
+            spectateState.hoverLabel.Enabled = false
+        end
+    end
+
+    Tabs.ESP:AddToggle("SpectateMode", {
+        Title = "Spectate Mode",
+        Description = "Hover no jogador → nome vermelho → clique = spectate. Q = voltar.",
+        Default = false,
+    }):OnChanged(function()
+        spectateState.enabled = Options.SpectateMode.Value
+        if spectateState.enabled then
+            startSpectateSystem()
+        else
+            stopSpectateSystem()
         end
     end)
 end
